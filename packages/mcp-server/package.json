@@ -3,6 +3,15 @@
 	"version": "0.0.6",
 	"description": "MCP server that drives JLCEDA Pro local client via an extension bridge (schematic helper)",
 	"type": "module",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/XuF163/jlc-schematic-helper",
+		"directory": "packages/mcp-server"
+	},
+	"homepage": "https://github.com/XuF163/jlc-schematic-helper",
+	"bugs": {
+		"url": "https://github.com/XuF163/jlc-schematic-helper/issues"
+	},
 	"files": [
 		"dist"
 	],
@@ -29,4 +38,3 @@
 		"node": ">=20.5.0"
 	}
 }
-
