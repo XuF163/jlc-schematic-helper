@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import process from 'node:process';
+import fs from 'node:fs/promises';
 
 import { WsBridge } from './bridge/wsBridge.js';
 import { runMcpServer } from './mcpServer.js';
@@ -28,6 +29,39 @@ function parseTimeoutMs(value: string | undefined, defaultValue: number): number
 	const n = Number(value);
 	if (!Number.isFinite(n) || n <= 0) throw new Error(`Invalid timeout ms: ${value}`);
 	return Math.floor(n);
+}
+
+function countTruthy(values: Array<unknown>): number {
+	return values.reduce<number>((acc, v) => acc + (v ? 1 : 0), 0);
+}
+
+async function parseParams(
+	kind: 'call' | 'tool',
+	opts: { raw?: string; file?: string },
+): Promise<unknown> {
+	if (countTruthy([opts.raw, opts.file]) > 1) {
+		throw new Error('Provide only one of --params or --params-file');
+	}
+
+	const defaultValue = kind === 'call' ? undefined : {};
+	if (!opts.raw && !opts.file) return defaultValue;
+
+	let text = opts.raw;
+	if (!text && opts.file) {
+		text = await fs.readFile(opts.file, 'utf8');
+	}
+
+	if (!text) return defaultValue;
+
+	// PowerShell on Windows may write UTF-8 with BOM by default.
+	text = text.replace(/^\uFEFF/, '').trim();
+
+	try {
+		return JSON.parse(text);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		throw new Error(`Invalid params JSON: ${msg}`);
+	}
 }
 
 async function requestExtensionDisconnect(bridge: WsBridge): Promise<void> {
@@ -59,6 +93,7 @@ async function main(): Promise<void> {
 	const callMethod = getArgValue('--call');
 	const toolName = getArgValue('--tool');
 	const callParamsRaw = getArgValue('--params');
+	const callParamsFile = getArgValue('--params-file');
 	const callWaitMs = parseTimeoutMs(getArgValue('--wait-ms'), 60_000);
 	const callTimeoutMs = parseTimeoutMs(getArgValue('--timeout-ms'), 120_000);
 
@@ -95,15 +130,13 @@ async function main(): Promise<void> {
 		}
 
 		let callParams: unknown = undefined;
-		if (callParamsRaw) {
-			try {
-				callParams = JSON.parse(callParamsRaw);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				process.stderr.write(`[jlceda-schematic-helper] Invalid --params JSON: ${msg}\n`);
-				bridge.close();
-				process.exit(2);
-			}
+		try {
+			callParams = await parseParams('call', { raw: callParamsRaw, file: callParamsFile });
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			process.stderr.write(`[jlceda-schematic-helper] ${msg}\n`);
+			bridge.close();
+			process.exit(2);
 		}
 
 			const result = await bridge.call(callMethod, callParams, callTimeoutMs);
@@ -123,15 +156,13 @@ async function main(): Promise<void> {
 		}
 
 		let callParams: unknown = {};
-		if (callParamsRaw) {
-			try {
-				callParams = JSON.parse(callParamsRaw);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				process.stderr.write(`[jlceda-schematic-helper] Invalid --params JSON: ${msg}\n`);
-				bridge.close();
-				process.exit(2);
-			}
+		try {
+			callParams = await parseParams('tool', { raw: callParamsRaw, file: callParamsFile });
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			process.stderr.write(`[jlceda-schematic-helper] ${msg}\n`);
+			bridge.close();
+			process.exit(2);
 		}
 
 		const tools = createToolRegistry(bridge);

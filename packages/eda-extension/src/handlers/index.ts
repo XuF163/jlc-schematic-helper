@@ -2,6 +2,7 @@ import type { BridgeStatusSnapshot } from '../bridge/wsClient';
 import { showToast } from '../bridge/ui';
 import { asObject, asString, rpcError } from '../bridge/validate';
 
+import { getDevice, searchDevices } from './library';
 import { exportEnetFile, getNetlist } from './schematic';
 
 export async function handleRpc(
@@ -22,13 +23,17 @@ export async function handleRpc(
 			const input = params ? asObject(params, 'params') : {};
 			const message = asString(input.message, 'message');
 			showToast(message, 'info', 4);
-				return { ok: true };
-			}
-			case 'schematic.getNetlist':
-				return await getNetlist(params);
-			case 'schematic.exportEnetFile':
-				return await exportEnetFile(params);
-			default:
-				throw rpcError('NOT_SUPPORTED', `Unknown method: ${method}`);
+			return { ok: true };
 		}
+		case 'library.searchDevices':
+			return await searchDevices(params);
+		case 'library.getDevice':
+			return await getDevice(params);
+		case 'schematic.getNetlist':
+			return await getNetlist(params);
+		case 'schematic.exportEnetFile':
+			return await exportEnetFile(params);
+		default:
+			throw rpcError('NOT_SUPPORTED', `Unknown method: ${method}`);
+	}
 }
