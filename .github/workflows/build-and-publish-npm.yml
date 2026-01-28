@@ -1,0 +1,139 @@
+name: Build/Publish NPM (jlceda-schematic-helper)
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to publish (e.g. v0.0.1). Leave empty to only build."
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Resolve ref (workflow_dispatch)
+        id: ref
+        if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+        shell: bash
+        run: |
+          echo "ref=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.ref || github.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Sync & validate versions
+        run: |
+          npm run version:sync
+          npm run version:check
+
+      - name: Build MCP server package
+        run: npm run build:mcp
+
+      - name: Pack (artifact)
+        run: |
+          mkdir -p artifacts
+          cd packages/mcp-server
+          npm pack --pack-destination ../../artifacts
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jlceda-schematic-helper-npm-tgz
+          path: artifacts/*.tgz
+          if-no-files-found: error
+
+  publish:
+    # Publish only for version tags, or for workflow_dispatch when inputs.tag is provided.
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    concurrency:
+      group: publish-npm-${{ inputs.tag || github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            if [[ -z "${{ inputs.tag }}" ]]; then
+              echo "Missing input 'tag' for workflow_dispatch" >&2
+              exit 1
+            fi
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Upgrade npm (trusted publishing)
+        run: npm i -g npm@^11.5.1
+
+      - name: Install
+        run: npm ci
+
+      - name: Sync & validate versions
+        run: |
+          npm run version:sync
+          npm run version:check
+
+      - name: Verify tag matches package.json version
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          node - <<'NODE'
+          const pkg = require('./package.json')
+          const tag = (process.env.RELEASE_TAG || '').replace(/^v/, '')
+
+          if (!tag) {
+            console.error('Missing RELEASE_TAG')
+            process.exit(1)
+          }
+
+          if (pkg.version !== tag) {
+            console.error(`package.json version ${pkg.version} != tag ${tag}`)
+            process.exit(1)
+          }
+
+          console.log('Version OK:', pkg.version)
+          NODE
+
+      - name: Build MCP server package
+        run: npm run build:mcp
+
+      - name: Publish to npm (OIDC trusted publishing)
+        run: npm -w packages/mcp-server publish --access public --provenance

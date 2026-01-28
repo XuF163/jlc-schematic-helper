@@ -1,0 +1,12 @@
+.ace-tool/
+artifacts/
+node_modules/
+dist/
+build/dist/
+packages/**/dist/
+packages/**/build/dist/
+reference-readonly/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
